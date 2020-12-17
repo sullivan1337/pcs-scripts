@@ -4,7 +4,7 @@
 
 What these will do will scan ALL policies (just choose the severity you want, normally HIGH) within your Prisma Cloud environment, and then depending on the Severity chosen (Low, Medium, High), will add ALL of the Policies to the existing Alert Rule. 
 
-1. Use the *curl_GET* command to get the correct **policyScanConfigId**(s) that you will use as the input for all other scripts
+1. Use the *curl_GET* or the *GET_all* script to get the correct **policyScanConfigId**(s) that you will use as the input for all other scripts
 
 1. Select the script with the Policy severity that you want to auto-select for the existing Alert Rule(s)
 
