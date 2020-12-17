@@ -1,0 +1,7 @@
+# Use this curl to get the correct policyScanConfigId to use in concurrent scripts in this repo
+# This also assumes you have the ability to generate a "x-redlock-autth" token
+
+
+curl --location --request GET 'https://api3.prismacloud.io/v2/alert/rule' \
+--header 'Content-Type: application/json' \
+--header 'x-redlock-auth: AUTH_TOKEN_GOES_HERE'
