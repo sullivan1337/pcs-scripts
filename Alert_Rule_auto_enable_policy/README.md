@@ -11,4 +11,3 @@ What these will do will scan ALL policies (just choose the severity you want, no
 ### That's it!
 
 As always, if anything is incorrect or needs updated, please submit a PR and will take a look.
-
