@@ -25,4 +25,12 @@ alert_rule_info=$(curl --location --request GET "$apiendpoint/v2/alert/rule" \
 # echo "All Alert Rules Info" $alert_rule_info
 
 policy_id_and_name=$(echo $alert_rule_info | jq -r '.[] | '.name,.policyScanConfigId' + " ,"')
-echo "Policy Names and IDs:" $policy_id_and_name
+echo "Policy Names and IDs:" 
+
+old_ifs="$IFS"
+IFS=","
+for i in $policy_id_and_name
+do
+  echo "$i"
+done
+IFS="$old_ifs"
