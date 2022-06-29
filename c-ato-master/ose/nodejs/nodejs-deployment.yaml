@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cato-nodejs
+  labels:
+    app: cato
+    ATO-PACKAGE: "CATO-09142020"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cato
+  template:
+    metadata:
+      labels:
+        app: cato
+        ATO-PACKAGE: "CATO-09142020"
+    spec:
+      containers:
+      - name: cato-nodejs
+        image: jshark2010/cato-nodejs-v1:2
+        ports:
+        - containerPort: 3000

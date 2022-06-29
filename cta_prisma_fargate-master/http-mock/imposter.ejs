@@ -1,0 +1,38 @@
+{
+  "port": 4545,
+  "protocol": "http",
+  "stubs": [
+    {
+      "predicates": [
+        {
+          "equals": {
+            "path": "/api/v1/defenders/fargate.json"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "is": {
+            "statusCode": 200,
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "name": "second",
+              "image": "service-second",
+              "cpu": 10,
+              "memory": 512,
+              "portMappings": [
+                {
+                  "hostPort": 443,
+                  "protocol": "tcp",
+                  "containerPort": 443
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

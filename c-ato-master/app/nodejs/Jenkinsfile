@@ -1,0 +1,82 @@
+pipeline {
+  environment {
+    nodejsimage = "cato-nodejs-v1"
+    registry = "jshark2010"
+    registryCredential = 'dockerhub'
+
+  }
+  agent any
+
+  stages {
+
+    stage('Test Powershell') {
+      steps{
+        pwsh label: 'Verify Powershell is installed', script: 'Write-Host "Powershell is installed!"'
+      }
+    }
+
+    stage('Building nodejs') {
+      steps{
+        script {
+          dockerImageNodeJs = docker.build("$registry/$nodejsimage:$BUILD_NUMBER", "-f ./app/nodejs/Dockerfile ./app/nodejs")
+          nodejsImageid = dockerImageNodeJs.imageName()
+        }
+      }
+    }
+
+    stage('Scan nodejs image') {
+      steps{
+        prismaCloudScanImage ca: '',
+        cert: '',
+        dockerAddress: 'unix:///var/run/docker.sock',
+        image: "$nodejsImageid",
+        key: '',
+        logLevel: 'info',
+        podmanPath: '',
+        project: '',
+        resultsFile: "$nodejsimage-$BUILD_NUMBER-prisma-cloud-scan-results.json",
+        ignoreImageBuildTime:true
+      }
+
+    }
+
+    stage('Publish nodejs results results') {
+      steps{
+        prismaCloudPublish resultsFilePattern: "$nodejsimage-$BUILD_NUMBER-prisma-cloud-scan-results.json"
+      }
+    }
+
+
+
+    stage('CATO-collection query Powershell Script') {
+      steps{
+        pwsh label: 'CATO-Collection Powershell', script: 'powershell/CATO-collection_query.ps1 ATO-PACKAGE:CATO-09142020 jonathan@clearshark.com "clearshark123!" "https://twistlock-console.oceast.cloudmegalodon.us"'
+      }
+    }
+
+    stage('Export POAM') {
+      steps{
+        sh 'python3 poamExporter/exportPoam-0.1.4.py -c https://twistlock-console.oceast.cloudmegalodon.us -u jonathan@clearshark.com -p clearshark123! -o "ATO-PACKAGE:CATO-09142020" -id "" -t scans -m poamExporter/POAM_Export_Sample.xlsx -eu "Jonathan Spigler" -a "cato" -b $BUILD_NUMBER'
+      }
+    }
+    stage('Deploy Image') {
+      steps{
+        script {
+          docker.withRegistry( '', registryCredential ) {
+            dockerImageNodeJs.push()
+          }
+        }
+      }
+    }
+    stage('Remove Unused docker image') {
+      steps{
+        sh "docker rmi $registry/$nodejsimage:$BUILD_NUMBER"
+      }
+    }
+  }
+  post {
+        always {
+            archiveArtifacts artifacts: '*.xlsx,*.csv', onlyIfSuccessful: true
+        }
+    }
+}

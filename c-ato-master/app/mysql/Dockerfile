@@ -1,0 +1,14 @@
+## Pull the mysql:latest image
+FROM mysql:latest
+
+LABEL OFFICE_ORG="Example Org" \
+POC_NAME="John Smith" \
+POC_EMAIL="smith_john@email.com" \
+ATO-PACKAGE="CATO-09142020" \
+ATO-COMPONENT="CATO-MYSQL-09142020" \
+OMB_PROJECT_ID="123456789" \
+DOD_COMPONENT="DoD"     \
+SYSTEM_PROJECT_NAME="CATO" \
+DOD_IT_REG_NO="23456" \
+SYSTEM_TYPE="IS Enclave" \
+POC_PHONE="123-456-7890"

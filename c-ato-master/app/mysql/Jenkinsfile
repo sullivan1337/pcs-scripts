@@ -1,0 +1,88 @@
+pipeline {
+  environment {
+    mysqlimage = "cato-app-mysql-v1"
+    registry = "jshark2010"
+    registryCredential = 'dockerhub'
+
+  }
+  agent any
+
+  stages {
+
+    stage('Test Powershell') {
+      steps{
+        pwsh label: 'Verify Powershell is installed', script: 'Write-Host "Powershell is installed!"'
+      }
+    }
+
+
+    stage('Check if subdirectory exists') {
+      steps{
+        sh 'ls -al'
+      }
+    }
+
+    stage('Building mysql') {
+      steps{
+        script {
+          dockerImagemysql = docker.build("$registry/$mysqlimage:$BUILD_NUMBER", "-f ./app/mysql/Dockerfile ./app/mysql")
+          mysqlimageid = dockerImagemysql.imageName()
+        }
+      }
+    }
+    stage('Scan mysql image') {
+      steps{
+        prismaCloudScanImage ca: '',
+        cert: '',
+        dockerAddress: 'unix:///var/run/docker.sock',
+        image: "$mysqlimageid",
+        key: '',
+        logLevel: 'info',
+        podmanPath: '',
+        project: '',
+        resultsFile: "$mysqlimage-$BUILD_NUMBER-prisma-cloud-scan-results.json",
+        ignoreImageBuildTime:true
+      }
+
+    }
+
+    stage('Publish mysql results results') {
+      steps{
+        prismaCloudPublish resultsFilePattern: "$mysqlimage-$BUILD_NUMBER-prisma-cloud-scan-results.json"
+      }
+    }
+
+
+
+    stage('CATO-collection query Powershell Script') {
+      steps{
+        pwsh label: 'CATO-Collection Powershell', script: 'powershell/CATO-collection_query.ps1 ATO-PACKAGE:CATO-08252020 jonathan@clearshark.com "clearshark123!" "https://twistlock-console.oceast.cloudmegalodon.us"'
+      }
+    }
+
+    stage('Export POAM') {
+      steps{
+        sh 'python3 poamExporter/exportPoam-0.1.4.py -c https://twistlock-console.oceast.cloudmegalodon.us -u jonathan@clearshark.com -p clearshark123! -o "ATO-PACKAGE:CATO-08252020" -id "" -t scans -m poamExporter/POAM_Export_Sample.xlsx -eu "Jonathan Spigler" -a "cato" -b $BUILD_NUMBER'
+      }
+    }
+    stage('Deploy Image') {
+      steps{
+        script {
+          docker.withRegistry( '', registryCredential ) {
+            dockerImagemysql.push()
+          }
+        }
+      }
+    }
+    stage('Remove Unused docker image') {
+      steps{
+        sh "docker rmi $registry/$mysqlimage:$BUILD_NUMBER"
+      }
+    }
+  }
+  post {
+        always {
+            archiveArtifacts artifacts: '*.xlsx,*.csv', onlyIfSuccessful: true
+        }
+    }
+}

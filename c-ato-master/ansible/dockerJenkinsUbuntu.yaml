@@ -1,0 +1,272 @@
+---
+  - hosts: jenkins_servers
+    become: yes
+    become_method: sudo
+    tasks:
+
+    - name: Update all packages
+      apt:
+        name: '*'
+        update_cache: yes
+
+    - name: Ensure a list of apt-get packages are installed
+      apt:
+        name: "{{ packages }}"
+        state: latest
+        update_cache: yes
+      vars:
+        packages:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+          - ansible
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+          - software-properties-common
+          - openjdk-8-jre
+          - python3-pip
+      tags:
+        - packages
+
+# Old approach
+    # - name: curl gpg key for docker
+    #   shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Verify that you now have the key with the fingerprint
+      shell: sudo apt-key fingerprint 0EBFCD88
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu bionic stable
+        state: present
+
+# Old approach
+    # - name: setup the stable repo
+    #   shell: |
+    #     sudo add-apt-repository \
+    #        "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+    #        $(lsb_release -cs) \
+    #        stable"
+
+    - name: Update all packages
+      apt:
+        name: '*'
+        update_cache: yes
+
+    - name: Install docker packages
+      apt:
+        name: "{{ packages }}"
+        state: latest
+        update_cache: yes
+      vars:
+        packages:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+
+    - name: Add the ubuntu user to docker group
+      user:
+        name: ubuntu
+        comment: ubntu
+        group: docker
+        append: yes
+
+    # - name: Reboot a slow machine that might have lots of updates to apply
+    #   reboot:
+    #     reboot_timeout: 3600
+
+    - name: make jenkins directory
+      file:
+        path: /opt/jenkins_docker
+        state: directory
+        owner: ubuntu
+        mode: '0755'
+
+    - name: install docker-py
+      pip:
+        name:
+          - docker
+          - pexpect
+      tags:
+        - docker-py
+        - packges
+        - pexpect
+
+    - name: Ensure directory exists for jks.
+      file:
+        path: /opt/letsencrypt/live/{{ inventory_hostname }}
+        state: directory
+        group: docker
+        owner: ubuntu
+      tags:
+        letsencrypt
+
+    - name: Ensure directory exists for local self-signed TLS certs.
+      file:
+        path: /etc/letsencrypt/live/{{ inventory_hostname }}
+        state: directory
+      tags:
+        letsencrypt
+
+    - name: Generate an OpenSSL private key.
+      openssl_privatekey:
+        path: /etc/letsencrypt/live/{{ inventory_hostname }}/privkey.pem
+      tags:
+        letsencrypt
+
+    - name: Generate an OpenSSL CSR.
+      openssl_csr:
+        path: /etc/ssl/private/{{ inventory_hostname }}.csr
+        privatekey_path: /etc/letsencrypt/live/{{ inventory_hostname }}/privkey.pem
+        common_name: "{{ inventory_hostname }}"
+      tags:
+        letsencrypt
+
+    - name: Generate a Self Signed OpenSSL certificate.
+      openssl_certificate:
+        path: /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
+        privatekey_path: /etc/letsencrypt/live/{{ inventory_hostname }}/privkey.pem
+        csr_path: /etc/ssl/private/{{ inventory_hostname }}.csr
+        provider: selfsigned
+      tags:
+        letsencrypt
+
+
+    - name: Generate PKCS#12 file
+      openssl_pkcs12:
+        action: export
+        path: /opt/letsencrypt/live/{{ inventory_hostname }}/jenkins.p12
+        friendly_name: "{{ inventory_hostname }}"
+        privatekey_path: "/etc/letsencrypt/live/{{ inventory_hostname }}/privkey.pem"
+        certificate_path: "/etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem"
+        state: present
+        passphrase: clearshark123!
+      tags:
+        - convert
+
+
+    - name: Import a pkcs12 keystore with a specified alias, create it if it doesn't exist
+      java_cert:
+        pkcs12_alias: "{{ inventory_hostname }}"
+        cert_alias: "{{ inventory_hostname }}"
+        pkcs12_path: /opt/letsencrypt/live/{{ inventory_hostname }}/jenkins.p12
+        pkcs12_password: "clearshark123!"
+        keystore_path: /opt/letsencrypt/live/{{ inventory_hostname }}//keystore.jks
+        keystore_pass: changeit
+        keystore_create: yes
+        state: present
+      tags:
+        - keytool
+
+    - name: update permissions for jks
+      file:
+        path: /opt/letsencrypt/live/{{ inventory_hostname }}
+        state: directory
+        group: docker
+        owner: ubuntu
+        mode: '0755'
+        recurse: yes
+      tags:
+        letsencrypt
+
+    - name: Create jenkins volumes
+      docker_volume:
+        name: '{{ item }}'
+      with_items:
+          - jenkins-data
+          - jenkins-volume
+
+    - name: create dockerfile
+      blockinfile:
+        path: /opt/jenkins_docker/Dockerfile
+        create: yes
+        block: |
+          FROM jenkins/jenkins:lts
+
+          USER root
+          RUN mkdir /var/log/jenkins
+          RUN mkdir /var/cache/jenkins
+          RUN chown -R jenkins:jenkins /var/cache/jenkins
+          RUN chown -R jenkins:jenkins /var/log/jenkins
+          RUN apt-get update \
+                && apt-get install -y sudo libltdl7 \
+                && rm -rf /var/lib/apt/lists/*
+          RUN adduser jenkins sudo
+          RUN echo "jenkins ALL=NOPASSWD: ALL" >> /etc/sudoers
+          RUN sudo apt update
+          RUN apt install python3-pip -y
+          RUN pip3 install requests jinja2 argparse urllib3 openpyxl
+
+          USER jenkins
+          ENV JAVA_OPTS="-Xmx8192m"
+          ENV JENKINS_OPTS="--handlerCountMax=300 --logfile=/var/log/jenkins/jenkins.log --webroot=/var/cache/jenkins/war --httpPort=-1 --httpsPort=8443 --httpsKeyStore=/var/jenkins_home/keys/keystore.jks --httpsKeyStorePassword=changeit"
+
+
+### ansible-ize THIS
+### docker run -p 8080:8080 -p 50000:50000 --restart unless-stopped --mount source=jenkins-log,target=/var/log/jenkins --mount source=jenkins-data,target=/var/jenkins_home  -v /var/run/docker.sock:/var/run/docker.sock -v $(which docker):/usr/bin/docker -d docker_jenkins
+
+
+    - name: Build image and with build args
+      docker_image:
+        name: docker_jenkins
+        state: present
+        build:
+          path: /opt/jenkins_docker
+        source: build
+        force_source: yes
+      tags:
+        - build
+
+# ENV JENKINS_OPTS --httpPort=-1 --httpsPort=8083 --httpsCertificate=/var/lib/jenkins/cert --httpsPrivateKey=/var/lib/jenkins/pk
+
+#$ docker run -v /home/ubuntu/johndoe/jenkins:/var/jenkins_home -p 443:8443 jenkins --httpPort=-1 --httpsPort=8443 --httpsKeyStore=/var/jenkins_home/jenkins_keystore.jks --httpsKeyStorePassword=<keystore password>
+
+
+    - name: Run jenkins docker container
+      docker_container:
+        hostname: docker_jenkins
+        name: docker_jenkins
+        image: docker_jenkins:latest
+        state: started
+        published_ports:
+         # - "0.0.0.0:8080:8080"
+         - "0.0.0.0:50000:50000"
+         - "0.0.0.0:8443:8443"
+        restart_policy: unless-stopped
+        mounts:
+          - "source=jenkins-log,target=/var/log/jenkins"
+          - "source=jenkins-data,target=/var/jenkins_home"
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+          - "/usr/bin/docker:/usr/bin/docker"
+          - "/opt/letsencrypt/live/{{ inventory_hostname }}:/var/jenkins_home/keys"
+      tags:
+        - container
+
+    - name: update permissions on /var/run/docker.sock
+      file:
+        path: /var/run/docker.sock
+        group: docker
+        owner: ubuntu
+        mode: '0755'
+
+    - name: Echo initial admin password
+      command: 'docker exec  docker_jenkins cat /var/jenkins_home/secrets/initialAdminPassword'
+      register: pw
+      tags:
+        - pw
+
+    - debug:
+        msg:
+          - Initial Admin password is {{ pw.stdout }}
+          - Your console can be accessed at https://{{ inventory_hostname }}:8443
+      tags:
+        - pw
